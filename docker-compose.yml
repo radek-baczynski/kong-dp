@@ -1,0 +1,93 @@
+version: "3"
+
+services:
+  kong-database:
+    image: "postgres:9.5"
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kong}
+      POSTGRES_DB: ${POSTGRES_DB:-kong}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  kong-migration:
+    image: "kong:latest"
+    command: "kong migrations up"
+    restart: on-failure
+    environment:
+      KONG_PG_HOST: kong-database
+    depends_on:
+      - kong-database
+
+  monolith:
+    image: nginx
+    volumes:
+      - ./monolith/:/usr/share/nginx/html
+
+  ssr:
+    image: nginx
+    volumes:
+      - ./ssr/:/usr/share/nginx/html
+
+  apiv2:
+    image: nginx
+    volumes:
+      - ./apiv2/:/usr/share/nginx/html/v2
+
+  apiv3:
+    image: nginx
+    volumes:
+      - ./apiv3/:/usr/share/nginx/html
+
+  opinions:
+    image: nginx
+    volumes:
+      - ./opinions/:/usr/share/nginx/html
+
+  kong:
+    image: "kong:latest"
+    restart: always
+    environment:
+      KONG_PG_HOST: kong-database
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_PROXY_LISTEN_SSL: 0.0.0.0:8443
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PROXY_ERROR_LOG: '/dev/stderr'
+    depends_on:
+      - kong-database
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://kong:8001"]
+      interval: 5s
+      timeout: 2s
+      retries: 15
+    labels:
+      traefik.backend: "symfony"
+      traefik.frontend.rule: "Host:www.dp.kong,api.dp.kong"
+      traefik.port: "8000"
+    ports:
+      - "${KONG_PORT:-8001}:8001"
+      - "${API_PORT:-8000}:8000"
+
+  konga:
+    image: "pantsel/konga:latest"
+    restart: always
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - kong
+    ports:
+      - "${KONGA_PORT:-1337}:1337"
+
+volumes:
+  conf-data:
+  db-data:
+
+networks:
+  default:
+    external:
+      name: local
